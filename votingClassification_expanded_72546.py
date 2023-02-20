@@ -11,17 +11,16 @@ from preprocessing import DropDuplicateColumns
 from preprocessing import RemoveOneValueColumn
 from preprocessing import ConcatProdLine
 from preprocessing import DataScaling
-from preprocessing import SingleImputer
 from preprocessing import IterativeImputer
+from preprocessing import CompressSimColumns
 import pandas as pd
 import numpy as np
 
-from imblearn.over_sampling import BorderlineSMOTE
-
 from sklearn.metrics import f1_score
+from pytorch_tabnet.tab_model import TabNetClassifier
 from lightgbm import LGBMClassifier
 from catboost import CatBoostClassifier
-from sklearn.ensemble import BaggingClassifier, GradientBoostingClassifier
+from sklearn.ensemble import BaggingClassifier, GradientBoostingClassifier, RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import RidgeClassifierCV
 from xgboost import XGBClassifier
@@ -37,14 +36,16 @@ def preprocess(train_X, train_y, test):
     train_X, test = RemoveEmptyColumn.preprocess(train_X, test)
     train_X, test = DropDuplicateColumns.preprocess(train_X, test)
     train_X, test = RemoveOneValueColumn.preprocess(train_X, test)
+    #train_X, test = CompressSimColumns.preprocess(train_X, test)
     train_X, test, new_col = ConcatProdLine.preprocess(train_X, test)
     #train_X, test = IterativeImputer.preprocess(train_X, test)
     train_X = train_X.fillna(0)
     test = test.fillna(0)
     train_X, test = DataScaling.robust(train_X, test)
     train_X, test, prod_dum = OnehotEncoder.preprocess(train_X, test, [new_col])
+    #train_X, test = StandardScale.preprocess(train_X, test, [x for x in train_X.columns if 'X_' in x])
 
-    return train_X, train_y, test
+    return train_X.values, train_y.values, test.values
 
 def training(train_X, train_y, test):
     models = [
@@ -59,7 +60,6 @@ def training(train_X, train_y, test):
         BaggingClassifier(random_state=seed),
         GradientBoostingClassifier(random_state=seed),
         RidgeClassifierCV(),
-
     ]
     
     [x.fit(train_X, train_y) for x in models]
@@ -74,7 +74,7 @@ def predict(models, test, mode=None, weights=None):
             axis=1,
             arr=preds
         )
-    if mode == "soft":
+    elif mode == "soft":
         preds = np.asarray([x.predict_proba(test) for x in models])
         res = np.zeros(preds[0].shape)
         for pred, weight in zip(preds, weights):
@@ -85,12 +85,14 @@ def predict(models, test, mode=None, weights=None):
     return res
 
 def submission(preds, basepath, filename):
-    """
-    
-    """
     submit = pd.read_csv('{}/sample_submission.csv'.format(basepath))
     submit['Y_Class'] = preds
     submit.to_csv('{}.csv'.format(filename), index=False)
+
+def compare(highest, preds):
+    high = pd.read_csv('highest.csv')['Y_Class']
+    preds = pd.Series(x for x in preds)
+    print((preds!=high).sum())
 
 def main():
     seed_everything(42) # Seed 고정
@@ -105,7 +107,7 @@ def main():
     models = training(train_X, train_y, test)
     preds = predict(models, test, "hard", [2,2,2,1,1,1])
     submission(preds, datapath, 'expanded_hard')
-
+    compare('highest.csv', preds)
 
 if __name__ == "__main__": 
     main()
